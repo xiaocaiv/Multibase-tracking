@@ -13,6 +13,7 @@ n_lc = length(lambda_c_values);
 
 pos_mean = NaN(2, n_lc);  pos_std = NaN(2, n_lc);
 vel_mean = NaN(2, n_lc);  vel_std = NaN(2, n_lc);
+gos_mean = NaN(1, n_lc);  gos_std = NaN(1, n_lc);   % GOSPA (收敛段均值)
 
 for idx = 1:n_lc
     lc = lambda_c_values(idx);
@@ -20,6 +21,7 @@ for idx = 1:n_lc
 
     pos_all = NaN(2, N_MC);
     vel_all = NaN(2, N_MC);
+    gos_all = NaN(1, N_MC);
 
     for mc = 1:N_MC
         rng(mc);
@@ -27,10 +29,12 @@ for idx = 1:n_lc
         overrides = struct('lambda_c', lc, 'use_features', USE_FEATURES);
         params = init_parameters(overrides);
         try
-            [pos_all(:, mc), vel_all(:, mc)] = run_simulation(params);
+            [pos_all(:, mc), vel_all(:, mc), g] = run_simulation(params);
+            gos_all(mc) = g.mean_total_conv;
         catch
             pos_all(:, mc) = NaN(2, 1);
             vel_all(:, mc) = NaN(2, 1);
+            gos_all(mc) = NaN;
         end
 
         if mod(mc, 10) == 0, fprintf('.'); end
@@ -48,8 +52,15 @@ for idx = 1:n_lc
     n_ok_t1 = sum(~isnan(pos_all(1, :)));
     n_ok_t2 = sum(~isnan(pos_all(2, :)));
 
-    fprintf('] OK=%d/%d 目标1 %.1f±%.1fm | 目标2 %.1f±%.1fm\n', ...
-        n_ok_t1, N_MC, pos_mean(1, idx), pos_std(1, idx), pos_mean(2, idx), pos_std(2, idx));
+    valid_gos = gos_all(~isnan(gos_all));
+    if ~isempty(valid_gos)
+        gos_mean(idx) = mean(valid_gos);
+        gos_std(idx)  = std(valid_gos);
+    end
+
+    fprintf('] OK=%d/%d 目标1 %.1f±%.1fm | 目标2 %.1f±%.1fm | GOSPA %.1f±%.1fm\n', ...
+        n_ok_t1, N_MC, pos_mean(1, idx), pos_std(1, idx), ...
+        pos_mean(2, idx), pos_std(2, idx), gos_mean(idx), gos_std(idx));
 end
 
 %% 图1: 位置RMSE vs 杂波密度 (带误差棒)
@@ -78,6 +89,19 @@ end
 xlabel('杂波密度 \lambda_c (每帧每平台)');
 ylabel('速度 RMSE (m/s)');
 title(sprintf('不同杂波密度下的速度估计 RMSE (N=%d Monte Carlo)', N_MC));
+legend('Location', 'best'); grid on;
+
+%% 图3: GOSPA vs 杂波密度 (带误差棒)
+% GOSPA 同时计入漏检与虚警, 杂波增大时通常比 RMSE 上升更明显,
+% 因此更能反映关联算法在密集杂波下的真实退化
+figure('Name', '杂波密度-GOSPA', 'Position', [100, 100, 750, 450]);
+errorbar(lambda_c_values, gos_mean, gos_std, 'o-', ...
+    'Color', [0.85, 0.33, 0.10], 'LineWidth', 1.5, 'MarkerSize', 8, ...
+    'MarkerFaceColor', [0.85, 0.33, 0.10], ...
+    'DisplayName', 'GOSPA (收敛段均值±1σ)');
+xlabel('杂波密度 \lambda_c (每帧每平台)');
+ylabel('GOSPA (m)');
+title(sprintf('不同杂波密度下的 GOSPA 指标 (N=%d Monte Carlo)', N_MC));
 legend('Location', 'best'); grid on;
 
 fprintf('完成。\n');

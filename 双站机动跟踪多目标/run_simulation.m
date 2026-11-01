@@ -1,8 +1,15 @@
-function [pos_rmse, vel_rmse] = run_simulation(params)
-%RUN_SIMULATION 运行一次仿真, 返回两目标的位置/速度 RMSE
+function [pos_rmse, vel_rmse, gos] = run_simulation(params)
+%RUN_SIMULATION 运行一次仿真, 返回两目标的位置/速度 RMSE 以及 GOSPA 统计
 %   [pos_rmse, vel_rmse] = RUN_SIMULATION(params)
+%   [pos_rmse, vel_rmse, gos] = RUN_SIMULATION(params)
 %   pos_rmse: [2x1] 每个目标的位置 RMSE (m)
 %   vel_rmse: [2x1] 每个目标的速度 RMSE (m/s)
+%   gos:      EVALUATE_GOSPA 的输出结构体 (仅在请求第 3 个输出时计算)
+%
+%   注意: RMSE 只评价"已正确关联"的航迹, 忽略漏检目标与虚假航迹; GOSPA 把
+%   两者都折算进距离代价, 更严格。蒙特卡洛统计建议同时报告两者。
+
+gos = [];
 
 truth = generate_truth(params);
 
@@ -154,5 +161,10 @@ for tgt = 1:params.num_targets
             vel_rmse(tgt) = mean(vel_err);
         end
     end
+end
+
+%% GOSPA 评价 (仅在调用方请求第 3 个输出时计算)
+if nargout >= 3
+    gos = evaluate_gospa(tracks_history, truth, params);
 end
 end

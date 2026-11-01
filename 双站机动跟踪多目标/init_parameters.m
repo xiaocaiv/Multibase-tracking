@@ -111,6 +111,16 @@ params.max_misses = 3;          % 航迹删除所需连续丢失次数
 params.init_cov = diag([1000, 1000, 100, 100]);  % 新航迹初始协方差
 params.max_new_tracks = 3;      % 每步最多新建航迹数
 
+%% GOSPA 评价参数
+% GOSPA 同时惩罚"定位误差""漏检目标""虚假航迹", 用来弥补 RMSE 只评价
+% 已正确关联航迹的缺陷 (RMSE 会忽略漏检与虚警, 因而偏乐观)
+params.gospa_c = 100;           % 截断距离 (m): 建议取典型位置误差的 3~5 倍;
+                                % 超过 c 的偏差不如直接判为"漏检 + 虚警"
+params.gospa_p = 2;             % 距离阶数 (p=2 时 GOSPA 满足度量公理)
+params.gospa_alpha = 2;         % 基数分配系数: 漏检/虚警各承担 c^p 的一半
+params.gospa_use_confirmed = true;  % true = 只用已确认航迹参与评估
+params.gospa_conv_step = 20;    % "收敛后均值"的起始步 (之前航迹尚未建立)
+
 %% 应用覆盖参数
 fns = fieldnames(overrides);
 for i = 1:length(fns)

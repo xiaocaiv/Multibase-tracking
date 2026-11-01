@@ -7,6 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Run the full simulation (MATLAB R2024a):
 matlab -batch "main"
+
+# Verify the GOSPA implementation (819 assertions: analytic values, brute-force
+# cross-check, both assignment solvers, metric axioms, per-frame counting):
+matlab -batch "test_gospa"
 ```
 
 All files must be on the MATLAB path (they are in a flat directory). Requires Statistics and Machine Learning Toolbox (`chi2inv`, `poissrnd`) and Signal Processing Toolbox (`spectrogram`, `hilbert`, `butter`, `filtfilt` — only when `use_features=true` with wav import).
@@ -39,8 +43,9 @@ generate_measurements  ──→  z1, z2  (struct arrays with .bearing, .spectru
 | **JPDA Core** | `feasible_events.m`, `jpda_associate.m` | Validation matrix → feasible joint events → marginal β probabilities |
 | **Orchestration** | `jpda_process_platform.m` | Per-platform: measurement predict → JPDA → UKF update → spectrum update |
 | **Management** | `manage_tracks.m`, `triangulate_init.m` | Track birth (triangulation + spectrum consistency check) and death |
+| **Evaluation** | `gospa_metric.m`, `evaluate_gospa.m` | GOSPA metric per frame (localization + cardinality decomposition); `test_gospa.m` is its self-check |
 | **Entry** | `main.m` | Simulation loop + history storage |
-| **Output** | `plot_results.m` | 6 figures: trajectory, bearings, position RMSE, velocity RMSE, track stats, spectrum templates |
+| **Output** | `plot_results.m` | 7 figures: trajectory, bearings, position RMSE, velocity RMSE, spectrum templates, GOSPA curve |
 
 ### Key Design Decisions
 
@@ -76,6 +81,11 @@ track.feature_init  % logical
 | `max_misses` | 3 | Frames before track deletion |
 | `confirm_hits` | 3 | Hits before track confirmed |
 | `max_new_tracks` | 3 | Max new tracks per frame |
+| `gospa_c` | 100 m | GOSPA cutoff; set to ~3–5× the typical position error |
+| `gospa_p` | 2 | GOSPA distance order (p=2 ⇒ metric axioms hold) |
+| `gospa_alpha` | 2 | Cardinality split; each missed target / false track costs c^p/α |
+| `gospa_use_confirmed` | true | Count only confirmed tracks as estimates |
+| `gospa_conv_step` | 20 | First step of the "steady-state" average window |
 
 ### Spectrum Feature System
 
@@ -84,3 +94,23 @@ track.feature_init  % logical
 - **Wav import** (valid `.wav` path): STFT → LOFAR extraction; bandpass → Hilbert envelope → FFT → DEMON extraction. Falls back to simulation on read failure.
 
 New tracks created from triangulation require both platform measurements' spectra to have Pearson ρ ≥ 0.4 (consistency check to suppress ghost tracks from clutter pairs).
+
+### GOSPA Evaluation
+
+`gospa_metric.m` implements the Rahmani–Vihola GOSPA distance for one time step:
+
+```
+GOSPA = [ min_γ ( Σ_(i,j)∈γ d(x_i,y_j)^p + (c^p/α)(n + m − 2|γ|) ) ]^(1/p)
+```
+
+where γ ranges over all partial injective assignments from truth set X (n points) to estimate set Y (m points). Unmatched points — missed targets or false tracks — each cost `c^p/α`.
+
+Key properties used in the code:
+- **Additive decomposition**: `total^p = loc^p + card^p`, where `loc` is the matched-pair term and `card` the missed/false term. This is what separates "inaccurate" from "incomplete/spurious" tracking.
+- **Assignment**: solved with the built-in `matchpairs` (base MATLAB, R2019b+, no toolbox). A self-contained Hungarian implementation (`hungarian_partial`) is the fallback for older releases; both are cross-checked against exhaustive enumeration in `test_gospa.m`.
+- **`evaluate_gospa.m`** runs this per frame over `tracks_history` and returns both the time series and summary statistics (`mean_total_conv` is the steady-state average, usually the number to quote).
+
+**Why it complements RMSE**: the existing RMSE associates tracks to targets by nearest neighbour at the final frame and reports error only for matched targets, so missed targets and false tracks are silently ignored. GOSPA charges for them, which is why GOSPA can be far larger than position RMSE. Report both — RMSE for localization accuracy of established tracks, GOSPA for overall tracking quality.
+
+**Cutoff choice**: `c` must be set relative to the scenario. With position errors of ~10–20 m and a 569 m minimum inter-target separation in the default scenario, `c = 100 m` discards gross association errors while staying sensitive to normal jitter.
+

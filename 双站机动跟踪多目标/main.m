@@ -177,5 +177,10 @@ end
 
 fprintf('仿真完成。\n');
 
-%% 可视化
-plot_results(truth, tracks_history, measurements_history, params, plat_history);
+%% GOSPA 评价 (与 RMSE 互补: 额外计入漏检目标与虚假航迹)
+% RMSE 只统计"已正确关联"的航迹偏差, 会忽略漏检和虚警; GOSPA 把两者都折算
+% 成距离代价, 因此指标更严格。参数见 init_parameters.m 中的 gospa_* 字段。
+gos = evaluate_gospa(tracks_history, truth, params);
+
+%% 可视化 (同时打印 RMSE 与 GOSPA 汇总)
+plot_results(truth, tracks_history, measurements_history, params, plat_history, gos);

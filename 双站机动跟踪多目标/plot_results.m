@@ -1,6 +1,7 @@
-function plot_results(truth, tracks_history, measurements_history, params, plat_history)
+function plot_results(truth, tracks_history, measurements_history, params, plat_history, gos)
 %PLOT_RESULTS 生成全部可视化图表
 %   PLOT_RESULTS(truth, tracks_history, measurements_history, params, plat_history)
+%   PLOT_RESULTS(..., gos)  gos 为 EVALUATE_GOSPA 的输出, 省略则不画 GOSPA 图
 %
 %   图表:
 %     Fig 1: 真实轨迹 vs 估计轨迹 (二维俯视图)
@@ -8,8 +9,13 @@ function plot_results(truth, tracks_history, measurements_history, params, plat_
 %     Fig 3: 位置 RMSE 随时间变化
 %     Fig 4: 速度 RMSE 随时间变化 (Vx / Vy 子图)
 %     Fig 5: 频谱模板对比 (真值 vs 估计, 仅 use_features=true 时)
+%     Fig 6: GOSPA 及其定位/基数分量 + 漏检与虚警数 (仅传入 gos 时)
 
 K = params.K;
+
+if nargin < 6
+    gos = [];
+end
 
 %% 提取估计航迹 (航迹到目标的关联基于最近邻)
 % 收集被确认为对应真实目标的航迹
@@ -290,6 +296,32 @@ if isfield(params, 'use_features') && params.use_features && isfield(truth, 'spe
     end
 end
 
+%% 图6: GOSPA 指标
+if ~isempty(gos)
+    figure('Name', 'GOSPA 指标', 'Position', [120, 120, 900, 620]);
+
+    % 上: 总 GOSPA 及其可加分解
+    subplot(2, 1, 1);
+    plot(gos.time, gos.total, 'k-',  'LineWidth', 2.0); hold on;
+    plot(gos.time, gos.loc,   'b--', 'LineWidth', 1.3);
+    plot(gos.time, gos.card,  'r-.', 'LineWidth', 1.3);
+    xlabel('时间 (s)'); ylabel('GOSPA (m)');
+    title(sprintf('GOSPA 及其分量 (p=%d, \\alpha=%d, c=%.0f m)', ...
+        gos.p, gos.alpha, gos.c));
+    legend({'总 GOSPA', '定位分量', '基数分量'}, 'Location', 'best');
+    grid on;
+
+    % 下: 基数误差来源
+    subplot(2, 1, 2);
+    stairs(gos.time, gos.n_missed, 'r-', 'LineWidth', 1.5); hold on;
+    stairs(gos.time, gos.n_false,  'm-', 'LineWidth', 1.5);
+    xlabel('时间 (s)'); ylabel('个数');
+    title('漏检目标数与虚假航迹数');
+    legend({'漏检目标 (missed)', '虚假航迹 (false)'}, 'Location', 'best');
+    ylim([0, max([1, gos.n_missed, gos.n_false]) + 0.5]);
+    grid on;
+end
+
 %% 打印平均 RMSE 汇总
 fprintf('\n========== 平均 RMSE 汇总 ==========\n');
 fprintf('%-8s %-16s %-16s %-16s\n', '目标', '位置RMSE(m)', '速度Vx RMSE(m/s)', '速度Vy RMSE(m/s)');
@@ -327,6 +359,35 @@ end
 fprintf('-----------------------------------------------\n');
 fprintf('%-8s %-16.2f %-16.2f %-16.2f\n', '总体平均', mean(all_pos), mean(all_vx), mean(all_vy));
 fprintf('===============================================\n');
+
+%% 打印 GOSPA 汇总
+if ~isempty(gos)
+    if gos.use_confirmed
+        scope = '仅确认航迹';
+    else
+        scope = '全部航迹';
+    end
+    fprintf('\n========== GOSPA 汇总 ==========\n');
+    fprintf('参数: p=%d, alpha=%d, 截断 c=%.0f m, 评估对象=%s\n', ...
+        gos.p, gos.alpha, gos.c, scope);
+    fprintf('%-24s %-14s %-14s %-14s\n', '统计区间', '总GOSPA(m)', '定位分量(m)', '基数分量(m)');
+    fprintf('------------------------------------------------------------\n');
+    fprintf('%-24s %-14.2f %-14.2f %-14.2f\n', ...
+        sprintf('全时段 (1~%d)', K), ...
+        gos.mean_total, gos.mean_loc, gos.mean_card);
+    fprintf('%-24s %-14.2f %-14.2f %-14.2f\n', ...
+        sprintf('收敛段 (%d~%d)', gos.conv_step, K), ...
+        gos.mean_total_conv, gos.mean_loc_conv, gos.mean_card_conv);
+    fprintf('%-24s %-14.2f %-14.2f %-14.2f\n', ...
+        '末帧', gos.final_total, gos.loc(end), gos.card(end));
+    fprintf('------------------------------------------------------------\n');
+    fprintf('最大总 GOSPA: %.2f m\n', gos.max_total);
+    fprintf('平均漏检目标数: %.2f 个/帧   平均虚假航迹数: %.2f 条/帧\n', ...
+        gos.mean_missed, gos.mean_false);
+    fprintf('说明: RMSE 只评价已正确关联的航迹, 忽略漏检与虚警; GOSPA 把三者\n');
+    fprintf('      统一折算为距离代价, 因此数值更大且更严格, 两者应配合使用。\n');
+    fprintf('===============================================\n');
+end
 
 fprintf('可视化完成。\n');
 end
